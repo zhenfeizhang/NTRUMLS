@@ -412,7 +412,6 @@ pq_gen_key(
   unsigned char *scratch;
   int64_t       *a1;
   int64_t       *a2;
-  int64_t       *a3;
   int64_t       *tmpx3;
 
   if(!P || !privkey_blob_len || !pubkey_blob_len)
@@ -460,7 +459,7 @@ pq_gen_key(
   get_public_key_ptrs(NULL, &h, &digest,
                       public_key_blob_len, pubkey_blob);
 
-  scratch_len = 6 * POLYNOMIAL_BYTES(P);
+  scratch_len = 5 * POLYNOMIAL_BYTES(P);
 
   if(!(scratch = malloc(scratch_len)))
   {
@@ -468,8 +467,7 @@ pq_gen_key(
   }
   a1 = (int64_t*)scratch;
   a2 = (int64_t*)(scratch + POLYNOMIAL_BYTES(P));
-  a3 = (int64_t*)(scratch + 2*POLYNOMIAL_BYTES(P));
-  tmpx3 = (int64_t*)(scratch + 3*POLYNOMIAL_BYTES(P));;
+  tmpx3 = (int64_t*)(scratch + 2*POLYNOMIAL_BYTES(P));;
   memset(scratch, 0, scratch_len);
 
 
@@ -495,15 +493,15 @@ pq_gen_key(
   {
     /* a^-1 = a^-1 * (2 - a * a^-1) mod q */
 
-    pol_mul_coefficients(a3, a1, a2, N, padN, q, tmpx3);
+    pol_mul_product(a1, a2, d1, d2, d3, fi, N, tmpx3);
 
     for (i = 0; i < N; ++i)
     {
-      a3[i] = q - a3[i];
+      a1[i] = -p*(a1[i] + a2[i]);
     }
 
-    a3[0] = a3[0] + 2;
-    pol_mul_coefficients(a2, a2, a3, N, padN, q, tmpx3);
+    a1[0] = a1[0] + 2;
+    pol_mul_coefficients(a2, a2, a1, N, padN, q, tmpx3);
   }
 
 
@@ -521,15 +519,19 @@ pq_gen_key(
     pol_mul_product(a1, a1, d1, d2, d3, gi, N, tmpx3);
     a1[0] += 1;
 
-  } while(PQNTRU_ERROR == pol_inv_modp(a3, a1, N, p));
+  } while(PQNTRU_ERROR == pol_inv_modp(tmpx3, a1, N, p));
 
   for(i=0; i<N; i++)
   {
-    ginv[i] = (int8_t)(a3[i] & 0xff);
+    ginv[i] = (int8_t)(tmpx3[i] & 0xff);
   }
 
   /* Calculate h = g/f mod q */
-  pol_mul_coefficients(h, a1, a2, N, padN, q, tmpx3);
+  pol_mul_product(h, a2, d1, d2, d3, gi, N, tmpx3);
+  for(i=0; i<N; i++)
+  {
+    h[i] = cmod(h[i] + a2[i], q);
+  }
 
   crypto_hash_sha512(digest, pubkey_blob, N*sizeof(int64_t));
 

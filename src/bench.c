@@ -103,8 +103,15 @@ bench_param_set(PQ_PARAM_SET_ID id)
   privkey_blob = malloc(privkey_blob_len);
   pubkey_blob = malloc(pubkey_blob_len);
 
-  pq_gen_key(P, &privkey_blob_len, privkey_blob,
-             &pubkey_blob_len, pubkey_blob);
+
+  c0 = clock();
+  for(i=0; i<TRIALS; i++) {
+    msg[(i&0xff)]++; /* Hash a different message each time */
+    pq_gen_key(P, &privkey_blob_len, privkey_blob,
+               &pubkey_blob_len, pubkey_blob);
+  }
+  c1 = clock();
+  printf("Time/key: %fs\n", (float) (c1 - c0)/(TRIALS*CLOCKS_PER_SEC));
 
   memset(msg, 0, 256);
   valid = 0;

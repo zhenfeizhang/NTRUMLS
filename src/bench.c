@@ -29,6 +29,7 @@
 #include "params.h"
 #include "pqerror.h"
 #include "pqntrusign.h"
+#include "pack.h"
 
 #define TRIALS 10000
 #define VERIFY 1
@@ -81,7 +82,9 @@ bench_param_set(PQ_PARAM_SET_ID id)
   unsigned char msg[256] = {0};
   uint16_t msg_len = 256;
 
-  int64_t *sigs;
+  unsigned char *sigs;
+  size_t packed_sig_len;
+
 
   clock_t c0;
   clock_t c1;
@@ -99,10 +102,8 @@ bench_param_set(PQ_PARAM_SET_ID id)
   //printf("privkey_blob_len: %d\n", (int) privkey_blob_len);
   //printf("pubkey_blob_len: %d\n", (int) pubkey_blob_len);
 
-  sigs = malloc(TRIALS * P->N * sizeof(int64_t));
   privkey_blob = malloc(privkey_blob_len);
   pubkey_blob = malloc(pubkey_blob_len);
-
 
   c0 = clock();
   for(i=0; i<TRIALS; i++) {
@@ -113,12 +114,17 @@ bench_param_set(PQ_PARAM_SET_ID id)
   c1 = clock();
   printf("Time/key: %fs\n", (float) (c1 - c0)/(TRIALS*CLOCKS_PER_SEC));
 
+  pq_sign(&packed_sig_len, NULL, privkey_blob_len, privkey_blob, pubkey_blob_len, pubkey_blob, 0, NULL);
+  printf("packed_sig_len %d\n", packed_sig_len);
+
+  sigs = malloc(TRIALS * packed_sig_len);
+
   memset(msg, 0, 256);
   valid = 0;
   c0 = clock();
   for(i=0; i<TRIALS; i++) {
     msg[(i&0xff)]++; /* Hash a different message each time */
-    valid += (PQNTRU_OK == pq_sign(sigs + (i * P->N),
+    valid += (PQNTRU_OK == pq_sign(&packed_sig_len, sigs + (i*packed_sig_len),
                                    privkey_blob_len, privkey_blob,
                                    pubkey_blob_len, pubkey_blob,
                                    msg_len, msg));
@@ -136,7 +142,7 @@ bench_param_set(PQ_PARAM_SET_ID id)
   c0 = clock();
   for(i=0; i<TRIALS; i++) {
     msg[(i&0xff)]++;
-    valid += (PQNTRU_OK == pq_verify(sigs + (i * P->N),
+    valid += (PQNTRU_OK == pq_verify(packed_sig_len, sigs + (i*packed_sig_len),
                                      pubkey_blob_len, pubkey_blob,
                                      msg_len, msg));
   }

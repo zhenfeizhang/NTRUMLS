@@ -38,6 +38,8 @@ struct _PQ_PARAM_SET {
   PQ_PARAM_SET_ID  id;          /* parameter set id */
   const char       *name;       /* human readable name */
   const uint8_t    OID[3];      /* OID */
+  uint8_t          N_bits;      /* ceil(log2(N)) */
+  uint8_t          q_bits;      /* ceil(log2(q)) */
   uint16_t         N;           /* ring degree */
   int8_t           p;           /* message space prime */
   int64_t          q;           /* ring modulus */

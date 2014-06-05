@@ -20,6 +20,7 @@ SOURCES = crypto_hash_sha512.c \
 					randombytes.c \
 					fastrandombytes.c \
 					shred.c \
+					convert.c \
 					pack.c \
 					pol.c \
 					params.c \

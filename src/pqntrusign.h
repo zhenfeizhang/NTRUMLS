@@ -32,7 +32,8 @@ pq_gen_key(
 
 int
 pq_sign(
-    int64_t             *sig,
+    size_t              *packed_sig_len,
+    unsigned char       *packed_sig,
     const size_t        private_key_len,
     const unsigned char *private_key_blob,
     const size_t        public_key_len,
@@ -42,7 +43,8 @@ pq_sign(
 
 int
 pq_verify(
-    int64_t             *sig,
+    const size_t        packed_sig_len,
+    const unsigned char *packed_sig,
     const size_t        public_key_len,
     const unsigned char *public_key_blob,
     const size_t        msg_len,

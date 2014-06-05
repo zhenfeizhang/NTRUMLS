@@ -57,20 +57,24 @@ challenge(
 
   PQ_PARAM_SET  *P;
 
-  unsigned char *digest;
+  const unsigned char *digest;
 
   unsigned char input[2*HASH_BYTES];
   unsigned char pool[HASH_BYTES];
 
   int result;
 
-  result = get_public_key_ptrs(&P, NULL, &digest,
-                               public_key_len, public_key_blob);
+  result = get_blob_params(&P, public_key_len, public_key_blob);
   if(PQNTRU_ERROR == result)
   {
     return PQNTRU_ERROR;
   }
 
+  result = get_digest_ptr(P, &digest, public_key_len, public_key_blob);
+  if(PQNTRU_ERROR == result)
+  {
+    return PQNTRU_ERROR;
+  }
 
   /* pool = hash(hash(msg) || hash(public key)) */
   crypto_hash_sha512(input, msg, msg_len);
@@ -116,7 +120,8 @@ challenge(
 
 int
 pq_sign(
-    int64_t             *sig,
+    size_t              *packed_sig_len,
+    unsigned char       *packed_sig,
     const size_t        private_key_len,
     const unsigned char *private_key_blob,
     const size_t        public_key_len,
@@ -139,34 +144,44 @@ pq_sign(
 
   size_t        scratch_len;
   unsigned char *scratch;
+  size_t        offset;
 
-  int8_t  *sp;
-  int8_t  *tp;
-  int64_t *s0;
-  int64_t *t0;
-  int64_t *ginv64;
-  int64_t *a;
-  int64_t *tmpx2;
+  uint16_t      *f;    /* Private key product form f indices */
+  uint16_t      *g;    /* .. product form g indices */
+  int64_t       *ginv; /* Private key; coefficients of g^{-1} */
+  int64_t       *h;    /* Public key coefficients */
+  int64_t       *s0;   /* scratch space for random lattice point */
+  int64_t       *t0;
+
+  int64_t       *a;    /* scratch space for 3 polynomials */
+  int64_t       *tmpx2;/* scratch space for 2 polynomials (aliased by a) */
+
+  int8_t        *sp;   /* Document hash */
+  int8_t        *tp;
+
 
   PQ_PARAM_SET  *P;
-  uint16_t      *fi;
-  uint16_t      *gi;
-  int8_t        *ginv;
-  int64_t       *h;
-  unsigned char *digest;
 
-  int result = PQNTRU_OK;
+  int rc = PQNTRU_OK;
 
-  result = get_private_key_ptrs(&P, &fi, &gi, &ginv,
-                                private_key_len, private_key_blob);
-  if(result == PQNTRU_ERROR)
+  if(!private_key_blob || !public_key_blob || !packed_sig_len)
   {
     return PQNTRU_ERROR;
   }
 
-  result = get_public_key_ptrs(NULL, &h, &digest,
-                               public_key_len, public_key_blob);
-  if(result == PQNTRU_ERROR)
+  rc = get_blob_params(&P, private_key_len, private_key_blob);
+  if(PQNTRU_ERROR == rc)
+  {
+    return PQNTRU_ERROR;
+  }
+
+  if(!packed_sig) /* Return signature size in packed_sig_len */
+  {
+    *packed_sig_len = SIGNATURE_BYTES(P);
+    return PQNTRU_OK;
+  }
+
+  if(!msg || msg_len == 0)
   {
     return PQNTRU_ERROR;
   }
@@ -179,27 +194,48 @@ pq_sign(
   d2 = P->d2;
   d3 = P->d3;
 
-  scratch_len = 6 * POLYNOMIAL_BYTES(P) + 2 * N;
+  scratch_len = 2 * PRODUCT_FORM_BYTES(P) /* f and g */
+              + 7 * POLYNOMIAL_BYTES(P)   /* h, ginv, and 5 scratch polys */
+              + 2 * N;                    /* sp, tp */
   if(!(scratch = malloc(scratch_len)))
   {
     return PQNTRU_ERROR;
   }
   memset(scratch, 0, scratch_len);
 
-  s0     = (int64_t*)(scratch);
-  t0     = (int64_t*)(scratch + POLYNOMIAL_BYTES(P));
-  ginv64 = (int64_t*)(scratch + 2*POLYNOMIAL_BYTES(P));
+  offset = 0;
+  f    = (uint16_t*)(scratch);          offset += PRODUCT_FORM_BYTES(P);
+  g    = (uint16_t*)(scratch + offset); offset += PRODUCT_FORM_BYTES(P);
+  h    =  (int64_t*)(scratch + offset); offset += POLYNOMIAL_BYTES(P);
+  ginv =  (int64_t*)(scratch + offset); offset += POLYNOMIAL_BYTES(P);
+  s0   =  (int64_t*)(scratch + offset); offset += POLYNOMIAL_BYTES(P);
+  t0   =  (int64_t*)(scratch + offset); offset += POLYNOMIAL_BYTES(P);
   /* a is treated as 3 polynomials, aliases tmpx2 */
-  a      = (int64_t*)(scratch + 3*POLYNOMIAL_BYTES(P));
-  tmpx2  = (int64_t*)(scratch + 4*POLYNOMIAL_BYTES(P));
-  sp     =  (int8_t*)(scratch + 6*POLYNOMIAL_BYTES(P));
-  tp     =  (int8_t*)(scratch + 6*POLYNOMIAL_BYTES(P) + N);
+  a    =  (int64_t*)(scratch + offset); offset += POLYNOMIAL_BYTES(P);
+  tmpx2=  (int64_t*)(scratch + offset); offset += 2* POLYNOMIAL_BYTES(P);
+  sp   =   (int8_t*)(scratch + offset); offset += N;
+  tp   =   (int8_t*)(scratch + offset);
 
-  for(i=0; i<N; i++)
+
+  /* Unpack the keys */
+  rc = unpack_private_key(P, f, g, ginv, private_key_len, private_key_blob);
+  if(PQNTRU_ERROR == rc)
   {
-    ginv64[i] = (int64_t) ginv[i];
+    shred(scratch, scratch_len);
+    free(scratch);
+    return PQNTRU_ERROR;
   }
 
+  rc = unpack_public_key(P, h, public_key_len, public_key_blob);
+  if(PQNTRU_ERROR == rc)
+  {
+    shred(scratch, scratch_len);
+    free(scratch);
+    return PQNTRU_ERROR;
+  }
+
+
+  /* Generate a document hash to sign */
   challenge(sp, tp,
             public_key_len, public_key_blob,
             msg_len, msg);
@@ -232,10 +268,10 @@ pq_sign(
     }
 
     /* a = ginv * (tp - t0) (mod p) */
-    pol_mul_coefficients(a, t0, ginv64, N, padN, p, a);
+    pol_mul_coefficients(a, t0, ginv, N, padN, p, a);
 
     /* tmpx2 = a * F = (a * (f-1)/p) */
-    pol_mul_product(tmpx2, a, d1, d2, d3, fi, N, tmpx2);
+    pol_mul_product(tmpx2, a, d1, d2, d3, f, N, tmpx2);
     for(i=0; i<N; i++)
     {
       m = p * (a[i] + tmpx2[i]);
@@ -259,7 +295,7 @@ pq_sign(
     }
 
     /* tmpx2 = a * G = (a * (g - 1)) */
-    pol_mul_product(tmpx2, a, d1, d2, d3, gi, N, tmpx2);
+    pol_mul_product(tmpx2, a, d1, d2, d3, g, N, tmpx2);
     for(i=0; i<N; i++)
     {
       m = (a[i] + tmpx2[i]);
@@ -288,7 +324,14 @@ pq_sign(
 #if STATS
   g_loop += loop;
 #endif
-  memcpy(sig, s0, N * sizeof(int64_t));
+
+  for(i=0; i<N; i++)
+  {
+    s0[i] = (s0[i] - sp[i])/P->p;
+    s0[i] += P->q / (2*P->p);
+  }
+
+  pack_signature(P, s0, *packed_sig_len, packed_sig);
 
   shred(scratch, scratch_len);
   free(scratch);
@@ -299,8 +342,9 @@ pq_sign(
 
 int
 pq_verify(
-    int64_t             *sig,
-    const size_t        public_key_len,
+    const size_t        packed_sig_len,
+    const unsigned char *packed_sig,
+    const size_t        public_key_blob_len,
     const unsigned char *public_key_blob,
     const size_t        msg_len,
     const unsigned char *msg)
@@ -313,22 +357,18 @@ pq_verify(
   int8_t        *sp;
   int8_t        *tp;
   int64_t       *h;
-  int64_t       *lh;
-  int64_t       *lsig;
+  int64_t       *sig;
   int64_t       *tmpx3;
 
   uint16_t      N;
   uint16_t      padN;
   int64_t       q;
   int8_t        p;
-  unsigned char *digest;
   uint16_t      error = 0;
   int           result;
 
 
-  result = get_public_key_ptrs(&P, &h, &digest,
-                               public_key_len, public_key_blob);
-
+  result = get_blob_params(&P, public_key_blob_len, public_key_blob);
   if(PQNTRU_ERROR == result)
   {
     return PQNTRU_ERROR;
@@ -346,26 +386,44 @@ pq_verify(
   }
   memset(scratch, 0, scratch_len);
 
-  lsig  = (int64_t*)scratch;
-  lh    = (int64_t*)(scratch + POLYNOMIAL_BYTES(P));
+  sig  = (int64_t*)scratch;
+  h    = (int64_t*)(scratch + POLYNOMIAL_BYTES(P));
   tmpx3 = (int64_t*)(scratch + 2*POLYNOMIAL_BYTES(P));
   sp    =  (int8_t*)(scratch + 5*POLYNOMIAL_BYTES(P));
   tp    =  (int8_t*)(scratch + 5*POLYNOMIAL_BYTES(P) + N);
 
-  memcpy(lh, h, N*sizeof(int64_t));
-  memcpy(lsig, sig, N*sizeof(int64_t));
+  result = unpack_public_key(P, h, public_key_blob_len, public_key_blob);
+  if(PQNTRU_ERROR == result)
+  {
+    free(scratch);
+    return PQNTRU_ERROR;
+  }
+
+  result = unpack_signature(P, sig, packed_sig_len, packed_sig);
+  if(PQNTRU_ERROR == result)
+  {
+    free(scratch);
+    return PQNTRU_ERROR;
+  }
+
 
   challenge(sp, tp,
-            public_key_len, public_key_blob,
+            public_key_blob_len, public_key_blob,
             msg_len, msg);
-
-  pol_mul_coefficients(tmpx3, lsig, lh, N, padN, q, tmpx3);
 
   for(i=0; i<N; i++)
   {
+    sig[i] = sig[i] - (P->q / (2*P->p));
+    sig[i] = sig[i] * P->p;
+    sig[i] = sig[i] + sp[i];
     error |= (cmod(sig[i], p) - sp[i]);
     error |= (sig[i] > P->norm_bound_s) || (-sig[i] > P->norm_bound_s);
+  }
 
+  pol_mul_coefficients(tmpx3, sig, h, N, padN, q, tmpx3);
+
+  for(i=0; i<N; i++)
+  {
     error |= (cmod(tmpx3[i], p) - tp[i]);
     error |= (tmpx3[i] > P->norm_bound_t) || (-tmpx3[i] > P->norm_bound_t) ;
   }
@@ -402,13 +460,12 @@ pq_gen_key(
   size_t        private_key_blob_len;
   size_t        public_key_blob_len;
 
-  uint16_t      *fi;
-  uint16_t      *gi;
-  int8_t        *ginv;
+  uint16_t      *f;
+  uint16_t      *g;
   int64_t       *h;
-  unsigned char *digest;
 
   size_t        scratch_len;
+  size_t        offset;
   unsigned char *scratch;
   int64_t       *a1;
   int64_t       *a2;
@@ -429,8 +486,8 @@ pq_gen_key(
 
   /* TODO: Standardize packed key formats */
 
-  private_key_blob_len = PRIV_KEY_PACKED_BYTES(P);
-  public_key_blob_len = PUB_KEY_PACKED_BYTES(P);
+  private_key_blob_len = PRIVKEY_PACKED_BYTES(P);
+  public_key_blob_len = PUBKEY_PACKED_BYTES(P);
 
   if(!privkey_blob || !pubkey_blob)
   {
@@ -451,24 +508,20 @@ pq_gen_key(
     return PQNTRU_ERROR;
   }
 
-  memcpy(privkey_blob, P->OID, OID_BYTES);
-  memcpy(pubkey_blob, P->OID, OID_BYTES);
-
-  get_private_key_ptrs(NULL, &fi, &gi, &ginv,
-                       private_key_blob_len, privkey_blob);
-  get_public_key_ptrs(NULL, &h, &digest,
-                      public_key_blob_len, pubkey_blob);
-
-  scratch_len = 5 * POLYNOMIAL_BYTES(P);
-
+  scratch_len = 2 * PRODUCT_FORM_BYTES(P) + 6 * POLYNOMIAL_BYTES(P);
   if(!(scratch = malloc(scratch_len)))
   {
     return PQNTRU_ERROR;
   }
-  a1 = (int64_t*)scratch;
-  a2 = (int64_t*)(scratch + POLYNOMIAL_BYTES(P));
-  tmpx3 = (int64_t*)(scratch + 2*POLYNOMIAL_BYTES(P));;
   memset(scratch, 0, scratch_len);
+
+  offset = 0;
+  f = (uint16_t*)(scratch);            offset += PRODUCT_FORM_BYTES(P);
+  g = (uint16_t*)(scratch + offset);   offset += PRODUCT_FORM_BYTES(P);
+  h  = (int64_t*)(scratch + offset);   offset += POLYNOMIAL_BYTES(P);
+  a1 = (int64_t*)(scratch + offset);   offset += POLYNOMIAL_BYTES(P);
+  a2 = (int64_t*)(scratch + offset);   offset += POLYNOMIAL_BYTES(P);
+  tmpx3 = (int64_t*)(scratch + offset);
 
 
   /* Find invertible pf mod q */
@@ -477,13 +530,13 @@ pq_gen_key(
    */
   do
   {
-    pol_gen_product(fi, d1, d2, d3, N);
+    pol_gen_product(f, d1, d2, d3, N);
 
     /* f = p * (1 + product form poly) */
     memset(a1, 0, POLYNOMIAL_BYTES(P));
     a1[0] = p;
 
-    pol_mul_product(a1, a1, d1, d2, d3, fi, N, tmpx3);
+    pol_mul_product(a1, a1, d1, d2, d3, f, N, tmpx3);
     a1[0] += p;
 
   } while(PQNTRU_ERROR == pol_inv_mod2(a2, a1, N));
@@ -493,7 +546,7 @@ pq_gen_key(
   {
     /* a^-1 = a^-1 * (2 - a * a^-1) mod q */
 
-    pol_mul_product(a1, a2, d1, d2, d3, fi, N, tmpx3);
+    pol_mul_product(a1, a2, d1, d2, d3, f, N, tmpx3);
 
     for (i = 0; i < N; ++i)
     {
@@ -511,29 +564,26 @@ pq_gen_key(
     /* Generate product form g,
      * then expand it to find inverse mod p
      */
-    pol_gen_product(gi, d1, d2, d3, N);
+    pol_gen_product(g, d1, d2, d3, N);
 
     memset(a1, 0, POLYNOMIAL_BYTES(P));
     a1[0] = 1;
 
-    pol_mul_product(a1, a1, d1, d2, d3, gi, N, tmpx3);
+    pol_mul_product(a1, a1, d1, d2, d3, g, N, tmpx3);
     a1[0] += 1;
 
   } while(PQNTRU_ERROR == pol_inv_modp(tmpx3, a1, N, p));
 
-  for(i=0; i<N; i++)
-  {
-    ginv[i] = (int8_t)(tmpx3[i] & 0xff);
-  }
+  pack_private_key(P, f, g, tmpx3, private_key_blob_len, privkey_blob);
 
-  /* Calculate h = g/f mod q */
-  pol_mul_product(h, a2, d1, d2, d3, gi, N, tmpx3);
+  /* Calculate public key, h = g/f mod q */
+  pol_mul_product(h, a2, d1, d2, d3, g, N, tmpx3);
   for(i=0; i<N; i++)
   {
     h[i] = cmod(h[i] + a2[i], q);
   }
 
-  crypto_hash_sha512(digest, pubkey_blob, N*sizeof(int64_t));
+  pack_public_key(P, h, public_key_blob_len, pubkey_blob);
 
   shred(scratch, scratch_len);
   free(scratch);

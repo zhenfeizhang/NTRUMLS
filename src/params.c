@@ -32,6 +32,8 @@ static PQ_PARAM_SET pqParamSets[] = {
       DRAFT_401,           /* parameter set id */
       "xxx-20140508-401",  /* human readable name */
       {0xff, 0xff, 0xff},  /* OID */
+      9,                   /* bitlength of N */
+      18,                  /* bitlength of q */
       401,                 /* ring degree */
       3,                   /* message space prime */
       1<<18,               /* ring modulus */
@@ -49,6 +51,8 @@ static PQ_PARAM_SET pqParamSets[] = {
       DRAFT_439,           /* parameter set id */
       "xxx-20140508-439",  /* human readable name */
       {0xff, 0xff, 0xfe},  /* OID */
+      9,                   /* bitlength of N */
+      19,                  /* bitlength of q */
       439,                 /* ring degree */
       3,                   /* message space prime */
       1<<19,               /* ring modulus */
@@ -66,13 +70,15 @@ static PQ_PARAM_SET pqParamSets[] = {
       DRAFT_593,           /* parameter set id */
       "xxx-20140508-593",  /* human readable name */
       {0xff, 0xff, 0xfd},  /* OID */
+      10,                  /* bitlength of N */
+      19,                  /* bitlength of q */
       593,                 /* ring degree */
       3,                   /* message space prime */
       1<<19,               /* ring modulus */
       300,                 /* max norm of f*a convolution */
-      100,                  /* max norm of g*a convolution */
+      100,                 /* max norm of g*a convolution */
       (1<<18) - 300,       /* q/2 - B_s */
-      (1<<18) - 100,        /* q/2 - B_t */
+      (1<<18) - 100,       /* q/2 - B_t */
       10,                  /* Product form +1/-1 counts */
       10,
        8,
@@ -83,6 +89,8 @@ static PQ_PARAM_SET pqParamSets[] = {
       DRAFT_743,           /* parameter set id */
       "xxx-20140508-743",  /* human readable name */
       {0xff, 0xff, 0xfc},  /* OID */
+      10,                  /* bitlength of N */
+      20,                  /* bitlength of q */
       743,                 /* ring degree */
       3,                   /* message space prime */
       1<<20,               /* ring modulus */

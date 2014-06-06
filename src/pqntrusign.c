@@ -35,10 +35,6 @@
 
 #define STATS 1
 
-int g_loop = 0;
-int g_max = 0;
-int g_max2 = 0;
-
 static int
 challenge(
     int8_t              *sp,
@@ -240,9 +236,6 @@ pq_sign(
             public_key_len, public_key_blob,
             msg_len, msg);
 
-#if STATS
-  int loop = 0;
-#endif
   do
   {
     error = 0;
@@ -282,16 +275,6 @@ pq_sign(
 
       error |= (cmod(s0[i], p) - sp[i]); /* Not necessary to check this */
       error |= (s0[i] > P->norm_bound_s) || (-s0[i] > P->norm_bound_s);
-#if STATS
-      if(m > g_max)
-      {
-        g_max = m;
-      }
-      else if(-m > g_max)
-      {
-        g_max =  -m;
-      }
-#endif
     }
 
     /* tmpx2 = a * G = (a * (g - 1)) */
@@ -305,25 +288,8 @@ pq_sign(
       t0[i] = m - t0[i] + tp[i];
       error |= (cmod(t0[i], p) - tp[i]); /* Not necessary to check this */
       error |= (t0[i] > P->norm_bound_t) || (-t0[i] > P->norm_bound_t) ;
-#if STATS
-      if(m > g_max2)
-      {
-        g_max2 = m;
-      }
-      else if(-m > g_max2)
-      {
-        g_max2 = -m;
-      }
-#endif
     }
-#if STATS
-    loop++;
-#endif
   } while(0 != error);
-
-#if STATS
-  g_loop += loop;
-#endif
 
   for(i=0; i<N; i++)
   {

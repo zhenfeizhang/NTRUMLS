@@ -545,71 +545,77 @@ pol_mul_product(
  * See: Thomé, "Karatsuba multiplication with temporary space of size \le n"
  * http://www.loria.fr/~thome/files/kara.pdf
  *
- * Note: Inputs should be of smooth length with many 2's
+ * Note: Input length should factor into b * 2^k, b <= 38
  */
 static void
 karatsuba(
-    int64_t        *res,   /* out - a * b in Z[x], must be length 2k */
-    int64_t        *tmp,   /*  in - k coefficients of scratch space */
-    const int64_t  *a,     /*  in - polynomial */
-    const int64_t  *b,     /*  in - polynomial */
-    const uint16_t  k)     /*  in - number of coefficients in a and b */
+    int64_t        *res1,   /* out - a * b in Z[x], must be length 2k */
+    int64_t        *tmp1,   /*  in - k coefficients of scratch space */
+    int64_t const  *a,     /*  in - polynomial */
+    int64_t const  *b,     /*  in - polynomial */
+    uint16_t const  k)     /*  in - number of coefficients in a and b */
 {
   uint16_t i;
   uint16_t j;
-  uint16_t m;
-  const uint16_t p = k>>1;
 
   /* Grade school multiplication for small / odd inputs */
   if(k <= 38 || (k & 1) != 0)
   {
-    memset(res, 0, 2*k*sizeof(int64_t));
-    for(i=0; i<k; i++)
+    for(j=0; j<k; j++)
     {
-      m = i;
-      for(j=0; j<k; j++, m++)
+      res1[j] = a[0]*b[j];
+    }
+    for(i=1; i<k; i++)
+    {
+      res1[i+k-1] = 0;
+      for(j=0; j<k; j++)
       {
-        res[m] += a[i]*b[j];
+        res1[i+j] += a[i]*b[j];
       }
     }
+    res1[2*k-1] = 0;
 
     return;
   }
 
-  for(i=0; i<p; i++)
-  {
-    res[i] = a[i] - a[i+p];
-    res[i+p] = b[i+p] - b[i];
-  }
+  uint16_t const p = k>>1;
 
-  karatsuba(tmp, res+k, res, res+p, p);
-
-  karatsuba(res+k,res,a+p,b+p,p);
-
-  for(i=0; i<k; i++)
-  {
-    tmp[i] += res[k+i];
-  }
-
-  memcpy(res+p,tmp,p*sizeof(int64_t));
+  int64_t *res2 = res1+p;
+  int64_t *res3 = res1+k;
+  int64_t *res4 = res1+k+p;
+  int64_t *tmp2 = tmp1+p;
+  int64_t const *a2 = a+p;
+  int64_t const *b2 = b+p;
 
   for(i=0; i<p; i++)
   {
-    res[k+i] += tmp[p+i];
+    res1[i] = a[i] - a2[i];
+    res2[i] = b2[i] - b[i];
   }
 
-  karatsuba(tmp,res,a,b,p);
+  karatsuba(tmp1, res3, res1, res2, p);
 
-  memcpy(res,tmp,p*sizeof(int64_t));
+  karatsuba(res3, res1, a2, b2, p);
 
   for(i=0; i<p; i++)
   {
-    res[p+i] += tmp[i] + tmp[p+i];
+    tmp1[i] += res3[i];
   }
 
-  for(i=p; i<k; i++)
+  for(i=0; i<p; i++)
   {
-    res[p+i] += tmp[i];
+    res2[i]  = tmp1[i];
+    tmp2[i] += res4[i];
+    res3[i] += tmp2[i];
+  }
+
+  karatsuba(tmp1, res1, a, b, p);
+
+  for(i=0; i<p; i++)
+  {
+    res1[i]  = tmp1[i];
+    res2[i] += tmp1[i] + tmp2[i];
+    res3[i] += tmp2[i];
   }
 
   return;
@@ -629,7 +635,6 @@ pol_mul_coefficients(
   uint16_t i;
   int64_t *res = tmp;
   int64_t *scratch = res + 2*padN;
-  memset(tmp, 0, 3*padN*sizeof(int64_t));
 
   karatsuba(res, scratch, a, b, padN);
 

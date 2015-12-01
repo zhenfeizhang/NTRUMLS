@@ -28,6 +28,8 @@
 #include "pol.h"
 #include "pqerror.h"
 
+
+
 static int64_t
 zz_gcd(
     const int64_t a,
@@ -644,8 +646,6 @@ pol_mul_coefficients(
   }
 }
 
-
-
 /* Center 'a' modulo p (an odd prime).
  * (a_i -> [-(p-1)/2, (p-1)/2]
  */
@@ -666,5 +666,347 @@ cmod(int64_t a, int64_t p)
   }
 
   return a;
+}
+
+
+
+/* maps index = a|b into a%3|b%3 where a and b are 4 bits each */
+uint8_t mod3map[256] = {
+        0,  1,  2,  0,  1,  2,  0,  1,  2,  0,  1,  2,  0,  1,  2,  0,
+       16, 17, 18, 16, 17, 18, 16, 17, 18, 16, 17, 18, 16, 17, 18, 16,
+       32, 33, 34, 32, 33, 34, 32, 33, 34, 32, 33, 34, 32, 33, 34, 32,
+        0,  1,  2,  0,  1,  2,  0,  1,  2,  0,  1,  2,  0,  1,  2,  0,
+       16, 17, 18, 16, 17, 18, 16, 17, 18, 16, 17, 18, 16, 17, 18, 16,
+       32, 33, 34, 32, 33, 34, 32, 33, 34, 32, 33, 34, 32, 33, 34, 32,
+        0,  1,  2,  0,  1,  2,  0,  1,  2,  0,  1,  2,  0,  1,  2,  0,
+       16, 17, 18, 16, 17, 18, 16, 17, 18, 16, 17, 18, 16, 17, 18, 16,
+       32, 33, 34, 32, 33, 34, 32, 33, 34, 32, 33, 34, 32, 33, 34, 32,
+        0,  1,  2,  0,  1,  2,  0,  1,  2,  0,  1,  2,  0,  1,  2,  0,
+       16, 17, 18, 16, 17, 18, 16, 17, 18, 16, 17, 18, 16, 17, 18, 16,
+       32, 33, 34, 32, 33, 34, 32, 33, 34, 32, 33, 34, 32, 33, 34, 32,
+        0,  1,  2,  0,  1,  2,  0,  1,  2,  0,  1,  2,  0,  1,  2,  0,
+       16, 17, 18, 16, 17, 18, 16, 17, 18, 16, 17, 18, 16, 17, 18, 16,
+       32, 33, 34, 32, 33, 34, 32, 33, 34, 32, 33, 34, 32, 33, 34, 32,
+        0,  1,  2,  0,  1,  2,  0,  1,  2,  0,  1,  2,  0,  1,  2,  0};
+
+int
+pol_mul_mod_p(
+     int64_t         *c,       /* out - address for polynomial c */
+     const int64_t   *a,       /*  in - pointer to polynomial a */
+     const int64_t   *b,       /*  in - pointer to polynomial b */
+     const uint16_t  N)        /*  in - ring degree */
+{
+  uint16_t  i,j;
+  uint64_t  *tmp;                     /* working buffer */
+  uint16_t  poly_len  = (N/16+1)*8;   /* FOUR_BITS_COEFF_POLY_BYTES(P) */
+  uint16_t  buf_len   = 4*poly_len;   /* store four polynomials */
+  uint16_t  poly_len64= (N/16+1);     /* number of uint64_t in a poly */
+
+  if(!( tmp= malloc(buf_len)))
+  {
+    return PQNTRU_ERROR;
+  }
+  memset(tmp, 0, buf_len);
+
+  /* base_even = a0a1 | a2a3 | a4a5 | ... */
+  uint64_t  *base_even64= (uint64_t*) tmp;
+  uint8_t   *base_even  = (uint8_t*)  base_even64;
+
+  /* base_odd  = a_N-1a0 | a1a2 | a3a4 | ... */
+  uint64_t  *base_odd64 = base_even64 + poly_len64;
+  uint8_t   *base_odd   = (uint8_t*)  base_odd64;
+
+  /* accumulate results when b_i is 1 */
+  uint64_t  *pos_buf64  = base_odd64 + poly_len64;
+  uint8_t   *pos_buf    = (uint8_t*)  pos_buf64;
+  uint16_t  pos_cnt     = 0;
+
+  /* accumulate results when b_i is -1 */
+  uint64_t  *neg_buf64  = pos_buf64 + poly_len64;
+  uint8_t   *neg_buf    = (uint8_t*)  neg_buf64;
+  uint16_t  neg_cnt     = 0;
+
+  /* convert the polynomial into 4 bits poly */
+  parse_4_bits_pol(base_odd, base_even,a, N);
+
+  /* start additions; proc 2 bits from b each loop
+   * performs 6 additions without cause errors; remove
+   * the noise after each 6 additions.
+   * */
+  for (i=0;i<N/2;i++)
+  {
+
+      if (b[2*i]==1)
+      {
+          pos_cnt++;
+          for (j=0;j<poly_len64;j++)
+          {
+              pos_buf64[j] += base_even64[j];
+          }
+          if (pos_cnt==6)
+          {
+              pos_cnt=0;
+              for (j=0;j<poly_len;j++)
+                  pos_buf[j]  = mod3map[pos_buf[j]];
+         }
+      }
+      else if (((int)b[2*i])==-1 || b[2*i]==2)
+      {
+          neg_cnt++;
+          for (j=0;j<poly_len64;j++)
+          {
+              neg_buf64[j] += base_even64[j];
+          }
+          if (neg_cnt==6)
+          {
+              neg_cnt=0;
+              for (j=0;j<poly_len;j++)
+                  neg_buf[j]  = mod3map[neg_buf[j]];
+          }
+      }
+        if (b[2*i+1]==1)
+        {
+            pos_cnt++;
+            for (j=0;j<poly_len64;j++)
+            {
+                pos_buf64[j] += base_odd64[j];
+            }
+            if (pos_cnt==6)
+            {
+                pos_cnt=0;
+                for (j=0;j<poly_len;j++)
+                    pos_buf[j]  = mod3map[pos_buf[j]];
+            }
+        }
+        else if (((int)b[2*i+1])==-1 || b[2*i+1]==2)
+        {
+            neg_cnt++;
+            for (j=0;j<poly_len64;j++)
+            {
+                neg_buf64[j] += base_odd64[j];
+            }
+            if (neg_cnt==6)
+            {
+                neg_cnt=0;
+                for (j=0;j<poly_len;j++)
+                    neg_buf[j]  = mod3map[neg_buf[j]];
+            }
+        }
+
+      /* shift both polynomials */
+      double_shift_poly(base_even,N);
+      double_shift_poly(base_odd, N);
+
+  }
+
+  /* taking care of the last coefficient of b*/
+  if (b[N-1]==1)
+  {
+      pos_cnt++;
+      for (j=0;j<poly_len64;j++)
+      {
+          pos_buf64[j] += base_even64[j];
+      }
+      if (pos_cnt==6)
+      {
+          pos_cnt=0;
+          for (j=0;j<poly_len;j++)
+              pos_buf[j]  = mod3map[pos_buf[j]];
+      }
+  }
+  else if (((int)b[N-1])==-1 || b[N-1]==2)
+  {
+      neg_cnt++;
+      for (j=0;j<poly_len64;j++)
+      {
+          neg_buf64[j] += base_even64[j];
+      }
+      if (neg_cnt==6)
+      {
+          neg_cnt=0;
+          for (j=0;j<poly_len;j++)
+              neg_buf[j]  = mod3map[neg_buf[j]];
+      }
+  }
+
+  /* put final result into c */
+  memset(c,0,N*8);
+
+  for( i=0;i<N/2;i++)
+  {
+      c[2*i]    = cmod((pos_buf[i]& 0b1111)
+                      -(neg_buf[i]& 0b1111),3);
+      c[2*i+1]  = cmod(((pos_buf[i]& 0b11110000)>>4)
+                      -((neg_buf[i]& 0b11110000)>>4),3);
+  }
+  c[N-1] = cmod((pos_buf[N/2]& 0b1111)
+               -(neg_buf[N/2]& 0b1111),3);
+
+
+  free(tmp);
+  return 0;
+}
+
+
+/*
+ * Functions for full byte trinary polynomials
+ */
+
+void
+shift_poly(
+    uint8_t         *p,
+    const uint16_t  N)
+{
+    uint8_t tmp;
+    tmp =   p[N-1];
+    memcpy(p+1, p, N-1);
+    p[0] = tmp;
+}
+
+void
+parse_pol(
+    uint8_t         *out,
+    const int64_t   *in,
+    const uint16_t  N)
+{
+    uint16_t i;
+    uint8_t  *buf;
+    buf = out;
+    memset(buf, 0, N);
+    for (i=0;i<N;i++)
+    {
+        switch (in[i])
+         {
+             case(1):    buf[i] = 0b00000001; break;
+         /*  case(0):    buf[i] = 0b00000000; break; */
+             case(-1):   buf[i] = 0b00000010; break;
+         }
+    }
+    return ;
+}
+
+
+/*
+ * Functions for half byte trinary polynomials
+ */
+void
+double_shift_poly(
+    uint8_t         *p,
+    const uint16_t  N)
+{
+    uint8_t tmp1;
+    uint8_t tmp2;
+    uint16_t len = N/2+1;
+    tmp1 =   p[len-1];          // a_N-1,0
+    tmp2 =   p[len-2];          // a_N-3,a_N-2
+
+    memmove(p+1, p, len-1);     // shift memory by 1 byte
+
+    p[0]                        // reset the first byte
+                                // should be a_N-2|a_N-1
+         = ((tmp1 & 0b1111)     // last 4 bits of tmp1 (a_N-1)
+            <<4)                //   shift left
+         + ((tmp2 & 0b11110000) // top 4 bits of tmp2 (a_N-2)
+            >>4) ;              //   shift right
+    return ;
+}
+
+
+void
+parse_4_bits_pol(
+    uint8_t         *out_odd,
+    uint8_t         *out_even,
+    const int64_t   *in,
+    const uint16_t  N)
+{
+    uint16_t i,len;
+    uint8_t  *buf_odd;
+    uint8_t  *buf_even;
+    buf_odd     = out_odd;
+    buf_even    = out_even;
+    len         = N/2+1;
+    memset(buf_odd, 0, len);
+    memset(buf_even, 0, len);
+
+    for (i=0;i<N/2;i++)
+    {
+    /* allocate even array a0a1 | a2a3 | a4a5 | ... | aN-3aN-2 | EMPTY */
+
+        if (in[2*i]==1&&in[2*i+1]==1)
+            buf_even[i] = 0b00010001;
+        if (in[2*i]==1&&in[2*i+1]==0)
+            buf_even[i] = 0b00000001;
+        if (in[2*i]==1&&in[2*i+1]==-1)
+            buf_even[i] = 0b00100001;
+
+        if (in[2*i]==0&&in[2*i+1]==1)
+            buf_even[i] = 0b00010000;
+     /* if (in[2*i]==0&&in[2*i+1]==0)
+            buf_even[i] = 0b00000000; */
+        if (in[2*i]==0&&in[2*i+1]==-1)
+            buf_even[i] = 0b00100000;
+
+        if (in[2*i]==-1&&in[2*i+1]==1)
+            buf_even[i] = 0b00010010;
+        if (in[2*i]==-1&&in[2*i+1]==0)
+            buf_even[i] = 0b00000010;
+        if (in[2*i]==-1&&in[2*i+1]==-1)
+            buf_even[i] = 0b00100010;
+
+    /* allocate odd array EMPTY | a1a2 | a3a4 | a5a6 | ... | aN-2aN-1 */
+
+        if (in[2*i+1]==1&&in[2*i+2]==1)
+            buf_odd[i+1] = 0b00010001;
+        if (in[2*i+1]==1&&in[2*i+2]==0)
+            buf_odd[i+1] = 0b00000001;
+        if (in[2*i+1]==1&&in[2*i+2]==-1)
+            buf_odd[i+1] = 0b00100001;
+
+        if (in[2*i+1]==0&&in[2*i+2]==1)
+            buf_odd[i+1] = 0b00010000;
+    /*  if (in[2*i+1]==0&&in[2*i+2]==0)
+            buf_odd[i+1] = 0b00000000;  */
+        if (in[2*i+1]==0&&in[2*i+2]==-1)
+            buf_odd[i+1] = 0b00100000;
+
+        if (in[2*i+1]==-1&&in[2*i+2]==1)
+            buf_odd[i+1] = 0b00010010;
+        if (in[2*i+1]==-1&&in[2*i+2]==0)
+            buf_odd[i+1] = 0b00000010;
+        if (in[2*i+1]==-1&&in[2*i+2]==-1)
+            buf_odd[i+1] = 0b00100010;
+
+    }
+    /* end pad the even array with aN-1,0 */
+    if (in[N-1] ==1)
+        buf_even[N/2] = 0b00000001;
+    /* if (in[N-1] ==0)
+        buf_even[N/2] = 0b00000000; */
+    if (in[N-1] ==-1)
+        buf_even[N/2] = 0b00000010;
+
+    /* front pad the odd array with aN-1,a0 */
+    if (in[0]==1&&in[N-1]==1)
+        buf_odd[0] = 0b00010001;
+    if (in[0]==1&&in[N-1]==0)
+        buf_odd[0] = 0b00010000;
+    if (in[0]==1&&in[N-1]==-1)
+        buf_odd[0] = 0b00010010;
+
+    if (in[0]==0&&in[N-1]==1)
+        buf_odd[0] = 0b00000001;
+/*  if (in[0]==0&&in[N-1]==0)
+        buf_odd[i+1] = 0b00000000;  */
+    if (in[0]==0&&in[N-1]==-1)
+        buf_odd[0] = 0b00000010;
+
+    if (in[0]==-1&&in[N-1]==1)
+        buf_odd[0] = 0b00100001;
+    if (in[0]==-1&&in[N-1]==0)
+        buf_odd[0] = 0b00100000;
+    if (in[0]==-1&&in[N-1]==-1)
+        buf_odd[0] = 0b00100010;
+
+    return;
 }
 

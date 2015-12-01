@@ -31,12 +31,12 @@
 #include "pqntrusign.h"
 #include "pack.h"
 
-#define TRIALS 10000
+#define TRIALS 100//10000
 #define VERIFY 1
 
-extern int g_loop;
-extern int g_max;
-extern int g_max2;
+int g_loop;
+int g_max;
+int g_max2;
 
 int bench_param_set(PQ_PARAM_SET_ID id);
 
@@ -51,6 +51,9 @@ main(int argc, char **argv)
     DRAFT_743
     };
   size_t numParams = sizeof(plist)/sizeof(PQ_PARAM_SET_ID);
+
+
+
 
   for(i = 0; i<numParams; i++)
   {
@@ -115,7 +118,7 @@ bench_param_set(PQ_PARAM_SET_ID id)
   printf("Time/key: %fs\n", (float) (c1 - c0)/(TRIALS*CLOCKS_PER_SEC));
 
   pq_sign(&packed_sig_len, NULL, privkey_blob_len, privkey_blob, pubkey_blob_len, pubkey_blob, 0, NULL);
-  printf("packed_sig_len %d\n", packed_sig_len);
+  printf("packed_sig_len %d\n", (int)packed_sig_len);
 
   sigs = malloc(TRIALS * packed_sig_len);
 

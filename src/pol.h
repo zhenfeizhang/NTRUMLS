@@ -78,6 +78,29 @@ pol_mul_coefficients(
      int64_t         *tmp);
 
 
+/*
+ * Functions for half byte trinary polynomials
+ */
+void
+double_shift_poly(
+    uint8_t         *p,
+    const uint16_t  N);
+
+void
+parse_4_bits_pol(
+    uint8_t         *out_odd,
+    uint8_t         *out_even,
+    const int64_t   *in,
+    const uint16_t  N);
+
+int
+pol_mul_mod_p(
+     int64_t         *c,       /* out - address for polynomial c */
+     const int64_t   *a,       /*  in - pointer to polynomial a */
+     const int64_t   *b,       /*  in - pointer to polynomial b */
+     const uint16_t  N);       /*  in - ring degree */
+
+
 int64_t cmod(const int64_t a, const int64_t p);
 
 

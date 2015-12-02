@@ -31,7 +31,7 @@
 #include "pqntrusign.h"
 #include "pack.h"
 
-#define TRIALS 100//10000
+#define TRIALS 1000//10000
 #define VERIFY 1
 
 int g_loop;
@@ -89,6 +89,9 @@ bench_param_set(PQ_PARAM_SET_ID id)
   size_t packed_sig_len;
 
 
+  uint64_t      *pre_processing;
+  size_t        no_of_data  =   TRIALS*10;
+
   clock_t c0;
   clock_t c1;
 
@@ -105,8 +108,11 @@ bench_param_set(PQ_PARAM_SET_ID id)
   //printf("privkey_blob_len: %d\n", (int) privkey_blob_len);
   //printf("pubkey_blob_len: %d\n", (int) pubkey_blob_len);
 
-  privkey_blob = malloc(privkey_blob_len);
-  pubkey_blob = malloc(pubkey_blob_len);
+  privkey_blob      = malloc(privkey_blob_len);
+  pubkey_blob       = malloc(pubkey_blob_len);
+  pre_processing    = malloc(2 * no_of_data * POLYNOMIAL_BYTES(P));
+
+  memset (pre_processing, 0, 2 * no_of_data * POLYNOMIAL_BYTES(P));
 
   c0 = clock();
   for(i=0; i<TRIALS; i++) {
@@ -124,13 +130,26 @@ bench_param_set(PQ_PARAM_SET_ID id)
 
   memset(msg, 0, 256);
   valid = 0;
+
+
+  /* pre_compute the data for signing */
   c0 = clock();
+  pq_pre_process  (pre_processing,   no_of_data,
+                   privkey_blob_len, privkey_blob,
+                   pubkey_blob_len,  pubkey_blob);
+  c1 = clock();
+  printf("Time/pre_data: %fs\n", (float) (c1 - c0)/(no_of_data*CLOCKS_PER_SEC));
+  c0 = clock();
+
   for(i=0; i<TRIALS; i++) {
-    msg[(i&0xff)]++; /* Hash a different message each time */
-    valid += (PQNTRU_OK == pq_sign(&packed_sig_len, sigs + (i*packed_sig_len),
-                                   privkey_blob_len, privkey_blob,
-                                   pubkey_blob_len, pubkey_blob,
-                                   msg_len, msg));
+
+
+    msg[(i&0xff)]++;    /* Hash a different message each time */
+    valid += (PQNTRU_OK == pq_sign_pp(&packed_sig_len, sigs + (i*packed_sig_len),
+                                       no_of_data, pre_processing,
+                                       privkey_blob_len, privkey_blob,
+                                       pubkey_blob_len, pubkey_blob,
+                                       msg_len, msg));
   }
   c1 = clock();
   printf("Time/signature: %fs\n", (float) (c1 - c0)/(TRIALS*CLOCKS_PER_SEC));

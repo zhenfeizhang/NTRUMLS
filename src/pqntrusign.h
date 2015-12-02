@@ -42,6 +42,28 @@ pq_sign(
     const unsigned char *msg);
 
 int
+pq_pre_process(
+    uint64_t            *pre_data,
+    const size_t        number_of_pre_data,
+    const size_t        private_key_len,
+    const unsigned char *private_key_blob,
+    const size_t        public_key_len,
+    const unsigned char *public_key_blob);
+
+int
+pq_sign_pp(
+    size_t              *packed_sig_len,
+    unsigned char       *packed_sig,
+    const size_t        data_len,
+    unsigned char       *pre_data,
+    const size_t        private_key_len,
+    const unsigned char *private_key_blob,
+    const size_t        public_key_len,
+    const unsigned char *public_key_blob,
+    const size_t        msg_len,
+    const unsigned char *msg);
+
+int
 pq_verify(
     const size_t        packed_sig_len,
     const unsigned char *packed_sig,

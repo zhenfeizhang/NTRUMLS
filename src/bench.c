@@ -31,7 +31,7 @@
 #include "pqntrusign.h"
 #include "pack.h"
 
-#define TRIALS 1000//10000
+#define TRIALS 1000
 #define VERIFY 1
 
 int g_loop;
@@ -71,7 +71,7 @@ main(int argc, char **argv)
 int
 bench_param_set(PQ_PARAM_SET_ID id)
 {
-  int i;
+  int i,j;
 
   int valid = 0;
 
@@ -87,7 +87,6 @@ bench_param_set(PQ_PARAM_SET_ID id)
 
   unsigned char *sigs;
   size_t packed_sig_len;
-
 
   uint64_t      *pre_processing;
   size_t        no_of_data  =   TRIALS*10;

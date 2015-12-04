@@ -206,7 +206,7 @@ pq_sign_pp(
 
     uint16_t i;
     int error = 0;
-
+    clock_t time1,time2;
     uint16_t  N;
     int8_t    p;
     uint16_t  d1;
@@ -264,9 +264,8 @@ pq_sign_pp(
     d3 = P->d3;
 
     scratch_len = 2 * PRODUCT_FORM_BYTES(P) /* f and g */
-                + 7 * POLYNOMIAL_BYTES(P)   /* ginv, and 6 scratch polys */
+                + 8 * POLYNOMIAL_BYTES(P)   /* ginv, and 8 scratch polys */
                 + 2 * N;                    /* t3, tp */
-
 
     if(!(scratch = malloc(scratch_len)))
     {
@@ -285,7 +284,7 @@ pq_sign_pp(
     t3   =  (int64_t*)(scratch + offset); offset += N;
     /* a is treated as 4 polynomials, aliases tmpx2 */
     a    =  (int64_t*)(scratch + offset); offset += POLYNOMIAL_BYTES(P);
-    tmpx2=  (int64_t*)(scratch + offset);
+    tmpx2=  (int64_t*)(scratch + offset); /* 4 scratch polys */
 
     /* Unpack the keys */
     rc = unpack_private_key(P, f, g, ginv, private_key_len, private_key_blob);
@@ -323,7 +322,7 @@ pq_sign_pp(
       /* a = ginv * (tp - t0) (mod p) */
       pol_mul_mod_p(a, t3, ginv, N);
 
-      pol_mul_product(tmpx2, a, d1, d2, d3, f, N, tmpx2);
+      tri_pol_mul_product(tmpx2, a, d1, d2, d3, f, N, tmpx2);
 
       for(i=0; i<N; i++)
       {
@@ -337,7 +336,7 @@ pq_sign_pp(
       }
 
       /* tmpx2 = a * G = (a * (g - 1)) */
-      pol_mul_product(tmpx2, a, d1, d2, d3, g, N, tmpx2);
+      tri_pol_mul_product(tmpx2, a, d1, d2, d3, g, N, tmpx2);
       for(i=0; i<N; i++)
       {
         m = (a[i] + tmpx2[i]);
@@ -516,7 +515,7 @@ pq_sign(
     /* a = ginv * (tp - t0) (mod p) */
     pol_mul_mod_p(a, t3, ginv, N);
 
-    pol_mul_product(tmpx2, a, d1, d2, d3, f, N, tmpx2);
+    tri_pol_mul_product(tmpx2, a, d1, d2, d3, f, N, tmpx2);
 
     for(i=0; i<N; i++)
     {
@@ -530,7 +529,7 @@ pq_sign(
     }
 
     /* tmpx2 = a * G = (a * (g - 1)) */
-    pol_mul_product(tmpx2, a, d1, d2, d3, g, N, tmpx2);
+    tri_pol_mul_product(tmpx2, a, d1, d2, d3, g, N, tmpx2);
     for(i=0; i<N; i++)
     {
       m = (a[i] + tmpx2[i]);

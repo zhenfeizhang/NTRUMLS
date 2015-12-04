@@ -78,13 +78,32 @@ pol_mul_coefficients(
      int64_t         *tmp);
 
 
+
+int64_t cmod(const int64_t a, const int64_t p);
+
+
 /*
  * Functions for half byte trinary polynomials
+ * each coefficient is 4 bits;
+ */
+
+/*
+ * shift coeffients of a poly twice; e.g.,
+ * in  = a0   + a1x   + a2x^2 ... + aN-1x^N-1
+ * out = aN-2 + aN-1x + a0x^2 ... + aN-3x^N-3
  */
 void
 double_shift_poly(
     uint8_t         *p,
     const uint16_t  N);
+
+/*
+ * convert a *int64_t poly into half byte poly
+ * where -1 = 0b0010; 0 = 0b0000; 1 = 0b0001
+ * outputs two polynomials:
+ * odd  = a1   + a2x   + a3x^2 ... + a0x^N-1
+ * even = a0   + a1x   + a2x^2 ... + aN-1x^N-1
+ * */
 
 void
 parse_4_bits_pol(
@@ -92,6 +111,14 @@ parse_4_bits_pol(
     uint8_t         *out_even,
     const int64_t   *in,
     const uint16_t  N);
+
+/*
+ * Both a and b are trinary; parse a into a half
+ * byte polynomial; each coefficient is 0b00XX,
+ * allows for 6 error-free additions; round the
+ * error by mod 3 (via mod3map); 1 uint64_t addition
+ * performs 16 coefficients additions.
+ * */
 
 int
 pol_mul_mod_p(
@@ -101,7 +128,51 @@ pol_mul_mod_p(
      const uint16_t  N);       /*  in - ring degree */
 
 
-int64_t cmod(const int64_t a, const int64_t p);
+/*
+ * Functions for full byte trinary polynomials
+ */
+
+/*
+ * each coefficient of poly is a byte;
+ * shift poly by "index" byte/coefficient
+ * */
+void
+shift_poly_k(
+    uint8_t         *out,
+    const uint8_t   *in,
+    const uint16_t  index,
+    const uint16_t  N);
 
 
+/*
+ * a is trinary; b is index (product form)
+ * compute c = a* b.coeff.
+ * convert a *int64_t poly into *int8_t poly
+ * where -1 = 0b00111111, this allows for 3
+ * error free additions; round off the error
+ * by &0b00111111 (&03F) after three additions;
+ * use uint64_t additions - 1 uint64_t addition
+ * adds 8 coefficients; the coefficient of
+ * result c should be in between (-31, 31);
+ * */
+
+void
+tri_pol_mul_indices(
+    int64_t         *c,
+    const int64_t   *a,
+    const uint16_t  bi_len,
+    const uint16_t  bi_M1_len,
+    const uint16_t  *bi,
+    const uint16_t  N,
+    uint64_t         *t);
+
+/*
+ * convert a *int64_t poly into *int8_t poly
+ * where -1 = 0b00111111
+ * */
+void
+parse_pol(
+    uint8_t         *out,
+    const int64_t   *in,
+    const uint16_t  N);
 #endif //CPQREF_POL_H_

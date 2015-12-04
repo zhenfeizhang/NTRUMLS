@@ -504,6 +504,59 @@ pol_mul_indices(
 
 
 void
+tri_pol_mul_product(
+    int64_t         *c,
+    const int64_t   *a,
+    const uint16_t  b1i_len,
+    const uint16_t  b2i_len,
+    const uint16_t  b3i_len,
+    const uint16_t  *bi,
+    const uint16_t  N,
+    int64_t         *t)
+{
+  if (b1i_len>15 || b2i_len>15 || b3i_len>15)
+  {
+      /* cannot use tri_pol_mul_indices when
+       * maximum c_i can be greater than 31.
+       */
+      pol_mul_product(c, a, b1i_len,b2i_len,
+                      b3i_len, bi, N, t);
+      return ;
+  }
+  uint16_t   i;
+  int64_t    *t0;
+  int64_t    *t1;
+  int64_t    *buf;
+  t0  = t;
+  t1  = t + N;
+  buf = t1+ N;
+  /* t2 = a * b1 */
+
+  tri_pol_mul_indices(t0, a, b1i_len, b1i_len, bi, N, t1);
+
+  /* t2 = (a * b1) * b2 */
+
+
+  short_pol_mul_indices(t0, t0, b2i_len, b2i_len,
+                  bi + (b1i_len << 1), N, buf);
+
+  /* t = a * b3 */
+  tri_pol_mul_indices(t1, a, b3i_len, b3i_len,
+                  bi + ((b1i_len + b2i_len) << 1), N, buf);
+
+  /* c = (a * b1 * b2) + (a * b3) */
+
+  for (i = 0; i < N; i++)
+  {
+    c[i] = (t0[i] + t1[i]);
+  }
+
+
+  return;
+}
+
+
+void
 pol_mul_product(
     int64_t         *c,
     const int64_t   *a,
@@ -541,7 +594,6 @@ pol_mul_product(
 
   return;
 }
-
 
 /* Space efficient Karatsuba multiplication.
  * See: Thomé, "Karatsuba multiplication with temporary space of size \le n"
@@ -688,6 +740,17 @@ uint8_t mod3map[256] = {
        16, 17, 18, 16, 17, 18, 16, 17, 18, 16, 17, 18, 16, 17, 18, 16,
        32, 33, 34, 32, 33, 34, 32, 33, 34, 32, 33, 34, 32, 33, 34, 32,
         0,  1,  2,  0,  1,  2,  0,  1,  2,  0,  1,  2,  0,  1,  2,  0};
+
+
+
+/*
+ * Both a and b are trinary; parse a into a half
+ * byte polynomial; each coefficient is 0b00XX,
+ * allows for 6 error-free additions; round the
+ * error by mod 3 (via mod3map); 1 uint64_t addition
+ * performs 16 coefficients additions.
+ * */
+
 
 int
 pol_mul_mod_p(
@@ -847,11 +910,165 @@ pol_mul_mod_p(
   return 0;
 }
 
+/*
+ * Functions for two bytes trinary polynomials
+ */
+/*
+ * a is short |a|<30; b is index (product form)
+ * compute c = a* b.coeff.
+ * convert a *int64_t poly into *int16_t poly
+ * where -1 = 0b0000 0111 1111 1111, this allows
+ * for 31 error free additions; no need to handle
+ * the error as we do maxmimum df3*2 = 30 additions;
+ * use uint64_t additions - 1 uint64_t addition
+ * adds 5 coefficients; the coefficient of
+ * result c should be in between (-1023, 1023);
+ * */
+
+void
+short_pol_mul_indices(
+    int64_t         *c,
+    const int64_t   *a,
+    const uint16_t  bi_len,
+    const uint16_t  bi_M1_len,
+    const uint16_t  *bi,
+    const uint16_t  N,
+    uint64_t         *t)
+{
+    uint16_t    i,j;
+    int8_t      t1,t2;
+    uint16_t    poly_len64;
+    uint16_t    *base_poly;
+    uint64_t    *base_poly64;
+    uint16_t    *rot_poly;
+    uint64_t    *rot_poly64;
+    uint16_t    *pos_res_poly;
+    uint64_t    *pos_res_poly64;
+    uint16_t    *neg_res_poly;
+    uint64_t    *neg_res_poly64;
+    uint16_t    *tmp;
+    tmp = t;
+    poly_len64  =   N/4+1;      /*  number of uint64_t in a poly */
+
+    memset(tmp,  0, 4*poly_len64*sizeof(uint64_t));
+
+    base_poly64     = (uint64_t*) tmp;
+    base_poly       = (uint16_t*) base_poly64;
+
+    rot_poly64      = base_poly64 + poly_len64;
+    rot_poly        = (uint16_t*) rot_poly64;
+
+    pos_res_poly64  = rot_poly64  + poly_len64;
+    pos_res_poly    = (uint16_t*) pos_res_poly64;
+
+    neg_res_poly64  = pos_res_poly64  + poly_len64;
+    neg_res_poly    = (uint16_t*) neg_res_poly64;
+
+    parse_two_bytes_pol(base_poly,a,N);
+
+    /* handling positive coefficients */
+    for (i=0;i<bi_len;i++)
+    {
+        shift_two_bytes_poly_k(rot_poly,base_poly, bi[i], N);
+
+        for (j=0;j<poly_len64;j++)
+        {
+            pos_res_poly64[j] += rot_poly64[j];
+        }
+    }
+
+    /* handling negative coefficients */
+    for (i=bi_len;i<2*bi_len;i++)
+    {
+        shift_two_bytes_poly_k(rot_poly,base_poly, bi[i], N);
+
+        for (j=0;j<poly_len64;j++)
+        {
+            neg_res_poly64[j] += rot_poly64[j];
+        }
+    }
+
+    /* subtract neg from pos */
+
+    for (j=0;j<N;j++)
+    {
+        t1  =  pos_res_poly[j] & 0x07ff;
+        if (t1>1024)
+            t1 -=2048;
+        else if (t1<-1024)
+            t1 +=2048;
+
+        t2  =  neg_res_poly[j] & 0x07ff;
+        if (t2>1024)
+            t2 -=2048;
+        else if (t2<-1024)
+            t2 +=2048;
+
+        c[j] = t1-t2;
+    }
+    return ;
+}
+
+/*
+ * convert a *int64_t poly into *int16_t poly
+ * where |a| < 30; using 11 bits to represent
+ * a and 5 bits of 0 to guard.
+ * */
+void
+parse_two_bytes_pol(
+    uint16_t        *out,
+    const int64_t   *in,
+    const uint16_t  N)
+{
+    uint16_t i;
+    uint16_t  *buf;
+    buf = out;
+    memset(buf, 0, N);
+    for (i=0;i<N;i++)
+    {
+        buf[i] = in[i]&0x07FF;
+    }
+    return ;
+}
+
+/*
+ * each coefficient of poly is two bytes;
+ * shift poly by 1 byte/coefficient
+ */
+void
+shift_two_bytes_poly(
+    uint16_t         *p,
+    const uint16_t  N)
+{
+    uint16_t tmp;
+    tmp =   p[N-1];
+    memcpy(p+1, p, 2*(N-1));
+    p[0] = tmp;
+}
+/*
+ * each coefficient of poly is two bytes;
+ * shift poly by "index" coefficients
+ * */
+void
+shift_two_bytes_poly_k(
+    uint16_t        *out,
+    const uint16_t  *in,
+    const uint16_t  index,
+    const uint16_t  N)
+{
+    memcpy(out,         in+N-index, 2*index);
+    memcpy(out+index,   in,         2*(N-index));
+    return;
+}
 
 /*
  * Functions for full byte trinary polynomials
  */
 
+/*
+ * each coefficient of poly is a byte;
+ * shift poly by 1 byte/coefficient
+ */
 void
 shift_poly(
     uint8_t         *p,
@@ -863,6 +1080,139 @@ shift_poly(
     p[0] = tmp;
 }
 
+/*
+ * each coefficient of poly is a byte;
+ * shift poly by "index" byte/coefficient
+ * */
+void
+shift_poly_k(
+    uint8_t         *out,
+    const uint8_t   *in,
+    const uint16_t  index,
+    const uint16_t  N)
+{
+    memcpy(out,         in+N-index, index);
+    memcpy(out+index,   in,         N-index);
+    return;
+}
+
+
+/*
+ * a is trinary; b is index (product form)
+ * compute c = a* b.coeff.
+ * convert a *int64_t poly into *int8_t poly
+ * where -1 = 0b00111111, this allows for 3
+ * error free additions; round off the error
+ * by &0b00111111 (&x3F) after three additions;
+ * use uint64_t additions - 1 uint64_t addition
+ * adds 8 coefficients; the coefficient of
+ * result c should be in between (-31, 31);
+ * */
+
+void
+tri_pol_mul_indices(
+    int64_t         *c,
+    const int64_t   *a,
+    const uint16_t  bi_len,
+    const uint16_t  bi_M1_len,
+    const uint16_t  *bi,
+    const uint16_t  N,
+    uint64_t         *t)
+{
+
+    uint16_t    i,j;
+    int8_t      t1,t2;
+    uint16_t    poly_len64;
+    uint8_t     *base_poly;
+    uint64_t    *base_poly64;
+    uint8_t     *rot_poly;
+    uint64_t    *rot_poly64;
+    uint8_t     *pos_res_poly;
+    uint64_t    *pos_res_poly64;
+    uint8_t     *neg_res_poly;
+    uint64_t    *neg_res_poly64;
+    uint8_t     *tmp;
+    tmp = t;
+    poly_len64  =   N/8+1;      //  number of uint64_t in a poly
+
+    memset(tmp,  0, 4*poly_len64*sizeof(uint64_t));
+
+    base_poly64     = (uint64_t*) tmp;
+    base_poly       = (uint8_t*)  base_poly64;
+
+    rot_poly64      = base_poly64 + poly_len64;
+    rot_poly        = (uint8_t*)  rot_poly64;
+
+    pos_res_poly64  = rot_poly64  + poly_len64;
+    pos_res_poly    = (uint8_t*)  pos_res_poly64;
+
+    neg_res_poly64  = pos_res_poly64  + poly_len64;
+    neg_res_poly    = (uint8_t*)  neg_res_poly64;
+
+    parse_pol(base_poly,a,N);
+
+    /* handling positive coefficients */
+    for (i=0;i<bi_len;i++)
+    {
+        shift_poly_k(rot_poly,base_poly, bi[i], N);
+
+        for (j=0;j<poly_len64;j++)
+        {
+            pos_res_poly64[j] += rot_poly64[j];
+        }
+        if (i%3==2)
+        {
+            for (j=0;j<poly_len64;j++)
+            {
+                pos_res_poly64[j] &= 0x3f3f3f3f3f3f3f3f;
+            }
+        }
+    }
+
+    /* handling negative coefficients */
+    for (i=bi_len;i<2*bi_len;i++)
+    {
+        shift_poly_k(rot_poly,base_poly, bi[i], N);
+
+        for (j=0;j<poly_len64;j++)
+        {
+            neg_res_poly64[j] += rot_poly64[j];
+        }
+
+        if (i%3==2)
+        {
+            for (j=0;j<poly_len64;j++)
+            {
+                neg_res_poly64[j] &= 0x3f3f3f3f3f3f3f3f;
+            }
+        }
+    }
+
+    /* subtract neg from pos */
+
+    for (j=0;j<N;j++)
+    {
+        t1  =  pos_res_poly[j] & 0x3f;
+        if (t1>32)
+            t1 -=64;
+        else if (t1<-32)
+            t1 +=64;
+
+        t2  =  neg_res_poly[j] & 0x3f;
+        if (t2>32)
+            t2 -=64;
+        else if (t2<-32)
+            t2 +=64;
+
+        c[j] = t1-t2;
+    }
+    return ;
+}
+
+/*
+ * convert a *int64_t poly into *int8_t poly
+ * where -1 = 0b00111111
+ * */
 void
 parse_pol(
     uint8_t         *out,
@@ -879,7 +1229,7 @@ parse_pol(
          {
              case(1):    buf[i] = 0b00000001; break;
          /*  case(0):    buf[i] = 0b00000000; break; */
-             case(-1):   buf[i] = 0b00000010; break;
+             case(-1):   buf[i] = 0b00111111; break;
          }
     }
     return ;
